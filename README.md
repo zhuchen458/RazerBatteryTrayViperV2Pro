@@ -6,26 +6,35 @@
 
 ## 启动排查
 
-v1.0.4 双击先显示状态窗口，启动日志位于 `%TEMP%\RazerBatteryTrayViperV2Pro-v1.0.4-startup.log`。如果双击后没有窗口，请查看日志最后一行。若没有本次启动的日志，在 EXE 所在文件夹打开 PowerShell，运行下列命令并保留输出。
+如果双击 EXE 后没有窗口，请从开始菜单打开普通 **Windows PowerShell**，粘贴下方整段代码并按回车。在弹出的文件选择窗口中，选中下载的 `RazerBatteryTrayViperV2Pro.exe` 并点「打开」。文件选择窗口会取得 EXE 的完整路径，可以从任意目录运行，无需管理员权限。
 
 ```powershell
-try {
-    $app = Start-Process -FilePath (Resolve-Path .\RazerBatteryTrayViperV2Pro.exe) -PassThru -ErrorAction Stop
-    if ($app.WaitForExit(4000)) {
-        'ExitCode = 0x{0:X8}' -f $app.ExitCode
-    } else {
-        'Process running, PID = {0}' -f $app.Id
+& {
+    Add-Type -AssemblyName System.Windows.Forms
+    $picker = New-Object System.Windows.Forms.OpenFileDialog
+    $picker.Title = '选择雷蛇电量托盘 EXE'
+    $picker.Filter = '应用程序 (*.exe)|*.exe'
+    if ($picker.ShowDialog() -ne 'OK') { return }
+
+    try {
+        $app = Start-Process -FilePath $picker.FileName -PassThru -ErrorAction Stop
+        if ($app.WaitForExit(4000)) {
+            'ExitCode = 0x{0:X8}' -f $app.ExitCode
+        } else {
+            '进程仍在运行，PID = {0}' -f $app.Id
+        }
+    } catch {
+        $_.Exception.GetBaseException().Message
     }
-} catch {
-    $_.Exception.Message
 }
 ```
 
-如果 Windows 安全中心的「保护历史记录」有与该 EXE 同一时间的拦截记录，也请保留这条记录。程序不需要管理员权限。
+v1.0.4 的启动日志位于 `%TEMP%\RazerBatteryTrayViperV2Pro-v1.0.4-startup.log`。要排查资源管理器双击失败，请在双击后、用 PowerShell 再次启动之前，检查日志修改时间是否更新，并保留最后几行。PowerShell 启动时也会重写这份日志。若 Windows 安全中心的「保护历史记录」有与该 EXE 同一时间的拦截记录，也请保留。
+
 
 ## 使用方法
 
-1. 如果旧版还在后台，先在任务管理器结束 `RazerBatteryTrayViperV2Pro.exe` 再替换文件。双击新版会打开电量窗口，显示鼠标连接状态和托盘图标状态。
+1. 如果旧版还在后台，先在任务管理器结束 `RazerBatteryTrayViperV2Pro.exe` 再替换文件。打开新版后，电量窗口会显示鼠标连接状态和托盘图标状态。如果双击无响应，按上方「启动排查」里的步骤打开。
 2. 先把 EXE 放到固定目录，再在窗口勾选「登录时自动启动」。以后登录 Windows 时，电量图标会自动出现在托盘。电脑已经运行时，可关掉电量窗口，继续在托盘查看。
 3. 在任务栏右下角或 `^` 菜单中找到电量图标。左键打开电量窗口，关闭窗口后仍可在托盘查看电量。
 4. 悬停可查看百分比、连接方式和充电状态。右键可立即刷新、切换开机启动或退出。
