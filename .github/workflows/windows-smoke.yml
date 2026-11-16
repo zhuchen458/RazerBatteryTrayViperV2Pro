@@ -1,0 +1,26 @@
+name: Windows startup check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'downloads/RazerBatteryTrayViperV2Pro.exe'
+      - 'scripts/test-windows.ps1'
+      - '.github/workflows/windows-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Start the checked-in portable EXE
+        shell: pwsh
+        run: ./scripts/test-windows.ps1
