@@ -4,23 +4,33 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
+#include <wchar.h>
 #include "device.h"
 
 enum {
     TRAY_MESSAGE = WM_APP + 1,
     BATTERY_MESSAGE,
+    SHOW_STATUS_MESSAGE,
     POLL_TIMER = 1,
     DEVICE_TIMER,
     MENU_REFRESH = 101,
     MENU_AUTOSTART,
     MENU_EXIT,
+    MENU_STATUS,
+    BUTTON_CLOSE,
     POLL_MS = 30000
 };
 
-static const wchar_t app_name[] = L"Razer Battery Tray · Viper V2 Pro";
+static const wchar_t app_name[] = L"毒蝰 V2 Pro 电量托盘";
+static const wchar_t window_class[] = L"RazerBatteryTrayViperV2Pro";
 static const wchar_t run_key[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 static const wchar_t run_value[] = L"RazerBatteryTrayViperV2Pro";
+static const wchar_t background_option[] = L" --background";
+enum { STARTUP_COMMAND_CAPACITY = MAX_PATH + 3 + ARRAYSIZE(background_option) };
 static HWND window;
+static HWND status_text;
+static HWND tray_text;
 static UINT taskbar_created;
 static NOTIFYICONDATAW tray;
 static bool tray_added;
@@ -119,18 +129,39 @@ static void refresh_tray(void)
             swprintf(tray.szTip, ARRAYSIZE(tray.szTip), L"毒蝰 V2 Pro · %ls", status);
     }
 
-    HICON icon = battery_icon(current);
-    if (!icon)
-        return;
-
     HICON previous = tray.hIcon;
-    tray.hIcon = icon;
+    HICON icon = battery_icon(current);
+    if (icon)
+        tray.hIcon = icon;
     if (tray_added && !Shell_NotifyIconW(NIM_MODIFY, &tray))
         tray_added = false;
-    if (!tray_added)
+    if (!tray_added && tray.hIcon)
         tray_added = Shell_NotifyIconW(NIM_ADD, &tray) != FALSE;
-    if (previous)
+    if (icon && previous)
         DestroyIcon(previous);
+
+    SetWindowTextW(status_text, tray.szTip);
+    SetWindowTextW(tray_text, tray_added
+        ? L"托盘图标已就绪。可在任务栏右下角或 ^ 菜单找到。"
+        : L"托盘图标暂未显示，程序会继续尝试添加。");
+}
+
+static void show_status(void)
+{
+    ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(window);
+}
+
+static HWND create_control(HINSTANCE instance, const wchar_t *class,
+                           const wchar_t *label, DWORD style, int id,
+                           int x, int y, int width, int height)
+{
+    HWND control = CreateWindowExW(0, class, label, WS_CHILD | WS_VISIBLE | style,
+                                   x, y, width, height, window, (HMENU)(INT_PTR)id,
+                                   instance, NULL);
+    if (control)
+        SendMessageW(control, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), FALSE);
+    return control;
 }
 
 static DWORD WINAPI read_worker(void *parameter)
@@ -151,29 +182,40 @@ static void request_refresh(void)
     if (worker) {
         refreshing = true;
         CloseHandle(worker);
+    } else {
+        current = (Battery){NO_RESPONSE, -1, 0};
+        has_result = true;
+        refresh_tray();
+        SetWindowTextW(status_text, L"无法启动电量读取，请点击「立即刷新」重试。");
     }
 }
 
-static bool startup_command(wchar_t *command, DWORD capacity)
+static bool startup_command(wchar_t *command, DWORD capacity, bool background)
 {
-    DWORD length = GetModuleFileNameW(NULL, command + 1, capacity - 2);
-    if (!length || length >= capacity - 2)
+    DWORD reserved = 2 + (background ? ARRAYSIZE(background_option) - 1 : 0);
+    DWORD length = GetModuleFileNameW(NULL, command + 1, capacity - reserved);
+    if (!length || length >= capacity - reserved)
         return false;
     command[0] = L'"';
     command[length + 1] = L'"';
     command[length + 2] = L'\0';
+    if (background)
+        wcscpy(command + length + 2, background_option);
     return true;
 }
 
 static bool starts_at_logon(void)
 {
-    wchar_t current_path[MAX_PATH + 3];
-    wchar_t value[MAX_PATH + 3];
+    wchar_t current_path[STARTUP_COMMAND_CAPACITY];
+    wchar_t value[STARTUP_COMMAND_CAPACITY];
     DWORD bytes = sizeof(value);
-    return startup_command(current_path, ARRAYSIZE(current_path)) &&
-           RegGetValueW(HKEY_CURRENT_USER, run_key, run_value, RRF_RT_REG_SZ,
-                        NULL, value, &bytes) == ERROR_SUCCESS &&
-           _wcsicmp(value, current_path) == 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, run_key, run_value, RRF_RT_REG_SZ,
+                     NULL, value, &bytes) != ERROR_SUCCESS)
+        return false;
+    return (startup_command(current_path, ARRAYSIZE(current_path), true) &&
+            _wcsicmp(value, current_path) == 0) ||
+           (startup_command(current_path, ARRAYSIZE(current_path), false) &&
+            _wcsicmp(value, current_path) == 0);
 }
 
 static void toggle_autostart(void)
@@ -182,8 +224,8 @@ static void toggle_autostart(void)
     if (starts_at_logon()) {
         status = RegDeleteKeyValueW(HKEY_CURRENT_USER, run_key, run_value);
     } else {
-        wchar_t command[MAX_PATH + 3];
-        if (!startup_command(command, ARRAYSIZE(command))) {
+        wchar_t command[STARTUP_COMMAND_CAPACITY];
+        if (!startup_command(command, ARRAYSIZE(command), true)) {
             MessageBoxW(window, L"程序路径过长，请将 EXE 移到较短的固定路径。", app_name, MB_ICONWARNING);
             return;
         }
@@ -203,6 +245,7 @@ static void tray_menu(void)
 
     AppendMenuW(menu, MF_STRING | MF_GRAYED, 0, tray.szTip);
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(menu, MF_STRING, MENU_STATUS, L"打开电量窗口");
     AppendMenuW(menu, MF_STRING, MENU_REFRESH, L"立即刷新");
     AppendMenuW(menu, MF_STRING | (starts_at_logon() ? MF_CHECKED : MF_UNCHECKED),
                 MENU_AUTOSTART, L"开机自动启动");
@@ -217,6 +260,9 @@ static void tray_menu(void)
     DestroyMenu(menu);
 
     switch (action) {
+    case MENU_STATUS:
+        show_status();
+        break;
     case MENU_REFRESH:
         request_refresh();
         break;
@@ -245,8 +291,26 @@ static LRESULT CALLBACK handle_message(HWND handle, UINT message, WPARAM wparam,
     case WM_TIMER:
         if (wparam == DEVICE_TIMER)
             KillTimer(handle, DEVICE_TIMER);
+        if (!tray_added)
+            refresh_tray();
         request_refresh();
         return 0;
+    case WM_COMMAND:
+        if (LOWORD(wparam) == MENU_REFRESH) {
+            request_refresh();
+            return 0;
+        }
+        if (LOWORD(wparam) == BUTTON_CLOSE) {
+            SendMessageW(handle, WM_CLOSE, 0, 0);
+            return 0;
+        }
+        break;
+    case WM_CLOSE:
+        ShowWindow(handle, tray_added ? SW_HIDE : SW_MINIMIZE);
+        return 0;
+    case SHOW_STATUS_MESSAGE:
+        show_status();
+        return TRUE;
     case BATTERY_MESSAGE:
         refreshing = false;
         current = (Battery){(int)lparam, (int)(wparam & 3) - 1, (int)(wparam >> 2)};
@@ -261,7 +325,7 @@ static LRESULT CALLBACK handle_message(HWND handle, UINT message, WPARAM wparam,
         if (lparam == WM_RBUTTONUP || lparam == WM_CONTEXTMENU)
             tray_menu();
         else if (lparam == WM_LBUTTONUP)
-            request_refresh();
+            show_status();
         return 0;
     case WM_DESTROY:
         if (tray_added)
@@ -274,15 +338,39 @@ static LRESULT CALLBACK handle_message(HWND handle, UINT message, WPARAM wparam,
     return DefWindowProcW(handle, message, wparam, lparam);
 }
 
+static void show_startup_error(const wchar_t *step, DWORD error)
+{
+    wchar_t message[160];
+    swprintf(message, ARRAYSIZE(message), L"%ls失败（Windows 错误 %lu）。", step, error);
+    MessageBoxW(NULL, message, app_name, MB_OK | MB_ICONERROR);
+}
+
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int show)
 {
     (void)previous;
-    (void)command;
     (void)show;
+    bool background = strcmp(command, "--background") == 0;
     HANDLE mutex = CreateMutexW(NULL, FALSE, L"Local\\RazerBatteryTrayViperV2Pro");
-    if (!mutex)
+    if (!mutex) {
+        show_startup_error(L"启动程序", GetLastError());
         return 1;
+    }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (!background) {
+            HWND running = FindWindowW(window_class, NULL);
+            DWORD_PTR opened = 0;
+            if (running) {
+                DWORD process = 0;
+                GetWindowThreadProcessId(running, &process);
+                if (process)
+                    AllowSetForegroundWindow(process);
+                SendMessageTimeoutW(running, SHOW_STATUS_MESSAGE, 0, 0,
+                                    SMTO_ABORTIFHUNG, 1000, &opened);
+            }
+            if (!opened)
+                MessageBoxW(NULL, L"已有实例在运行。若旧版仍在后台，请先在任务管理器结束它，再打开新版。",
+                            app_name, MB_OK | MB_ICONINFORMATION);
+        }
         CloseHandle(mutex);
         return 0;
     }
@@ -292,12 +380,32 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int sh
     const WNDCLASSW class = {
         .lpfnWndProc = handle_message,
         .hInstance = instance,
-        .lpszClassName = L"RazerBatteryTrayViperV2Pro"
+        .hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(32512)),
+        .hbrBackground = (HBRUSH)(INT_PTR)(COLOR_WINDOW + 1),
+        .lpszClassName = window_class
     };
     if (RegisterClassW(&class))
-        window = CreateWindowExW(0, class.lpszClassName, app_name, WS_OVERLAPPED,
-                                 0, 0, 0, 0, NULL, NULL, instance, NULL);
+        window = CreateWindowExW(0, window_class, app_name,
+                                 WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                                 CW_USEDEFAULT, CW_USEDEFAULT, 470, 210,
+                                 NULL, NULL, instance, NULL);
     if (!window) {
+        show_startup_error(L"创建电量窗口", GetLastError());
+        CloseHandle(mutex);
+        return 1;
+    }
+
+    status_text = create_control(instance, L"STATIC", L"正在读取…", SS_LEFT,
+                                 0, 22, 22, 416, 46);
+    tray_text = create_control(instance, L"STATIC", L"正在添加托盘图标…", SS_LEFT,
+                               0, 22, 76, 416, 28);
+    if (!status_text || !tray_text ||
+        !create_control(instance, L"BUTTON", L"立即刷新", BS_PUSHBUTTON | WS_TABSTOP,
+                        MENU_REFRESH, 22, 119, 108, 30) ||
+        !create_control(instance, L"BUTTON", L"关闭窗口", BS_PUSHBUTTON | WS_TABSTOP,
+                        BUTTON_CLOSE, 145, 119, 108, 30)) {
+        show_startup_error(L"初始化电量窗口", GetLastError());
+        DestroyWindow(window);
         CloseHandle(mutex);
         return 1;
     }
@@ -307,14 +415,23 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int sh
         .uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP, .uCallbackMessage = TRAY_MESSAGE
     };
     refresh_tray();
+    if (!background)
+        show_status();
     request_refresh();
-    SetTimer(window, POLL_TIMER, POLL_MS, NULL);
+    if (!SetTimer(window, POLL_TIMER, POLL_MS, NULL))
+        show_startup_error(L"启动定时刷新", GetLastError());
 
     MSG message;
     BOOL result;
     while ((result = GetMessageW(&message, NULL, 0, 0)) > 0) {
-        TranslateMessage(&message);
-        DispatchMessageW(&message);
+        if (!IsDialogMessageW(window, &message)) {
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+    if (result < 0) {
+        show_startup_error(L"读取窗口消息", GetLastError());
+        DestroyWindow(window);
     }
     CloseHandle(mutex);
     return result < 0 ? 1 : 0;
