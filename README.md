@@ -2,7 +2,9 @@
 
 在 Windows 任务栏右下角直接显示雷蛇毒蝰 V2 Pro 的电量百分比。适用 Windows 10 / 11 x64，单个 EXE 双击即可运行，无需安装或管理员权限。
 
-[下载 Windows x64 EXE](https://raw.githubusercontent.com/zhuchen458/RazerBatteryTrayViperV2Pro/main/downloads/RazerBatteryTrayViperV2Pro.exe) · [查看 GitHub Releases](https://github.com/zhuchen458/RazerBatteryTrayViperV2Pro/releases)
+[下载 Windows x64 EXE](https://raw.githubusercontent.com/zhuchen458/RazerBatteryTrayViperV2Pro/main/downloads/RazerBatteryTrayViperV2Pro.exe)
+
+EXE 的 SHA-256 为 `fa49dc533ea4b3da6f60195d0d69b5b799c2462bfda73677908e559d489f4fa1`。已检查报文编码、校验与电量换算，实际 HID 读取仍待毒蝰 V2 Pro 实机验证。
 
 ## 使用方法
 
