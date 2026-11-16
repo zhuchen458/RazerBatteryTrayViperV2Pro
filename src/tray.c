@@ -3,10 +3,10 @@
 #include <shellapi.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 #include <wchar.h>
 #include "device.h"
+#include "startup.h"
 
 enum {
     TRAY_MESSAGE = WM_APP + 1,
@@ -22,7 +22,7 @@ enum {
     POLL_MS = 30000
 };
 
-static const wchar_t app_name[] = L"毒蝰 V2 Pro 电量托盘";
+static const wchar_t app_name[] = L"毒蝰 V2 Pro 电量托盘 v1.0.2";
 static const wchar_t window_class[] = L"RazerBatteryTrayViperV2Pro";
 static const wchar_t run_key[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 static const wchar_t run_value[] = L"RazerBatteryTrayViperV2Pro";
@@ -116,17 +116,16 @@ static void refresh_tray(void)
     if (current.percent >= 0) {
         const wchar_t *link = current.product == WIRED_PID ? L"USB 有线" : L"2.4G 无线";
         const wchar_t *charging = current.charging == 1 ? L" · 充电中" : L"";
-        swprintf(tray.szTip, ARRAYSIZE(tray.szTip), L"毒蝰 V2 Pro · %d%% · %ls%ls",
-                 current.percent, link, charging);
+        DWORD_PTR args[] = {(DWORD_PTR)current.percent, (DWORD_PTR)link, (DWORD_PTR)charging};
+        format_message(tray.szTip, ARRAYSIZE(tray.szTip), L"毒蝰 V2 Pro · %1!d!%% · %2%3", args);
     } else {
         const wchar_t *status = !has_result ? L"正在读取…" :
             current.percent == NO_DEVICE ? L"未连接" : L"设备无响应，移动鼠标后重试";
-        if (last_percent >= 0)
-            swprintf(tray.szTip, ARRAYSIZE(tray.szTip),
-                     L"毒蝰 V2 Pro · %ls\n上次 %d%%（%02u:%02u）", status, last_percent,
-                     (unsigned)last_read.wHour, (unsigned)last_read.wMinute);
-        else
-            swprintf(tray.szTip, ARRAYSIZE(tray.szTip), L"毒蝰 V2 Pro · %ls", status);
+        DWORD_PTR args[] = {(DWORD_PTR)status, (DWORD_PTR)last_percent,
+                            (DWORD_PTR)last_read.wHour, (DWORD_PTR)last_read.wMinute};
+        format_message(tray.szTip, ARRAYSIZE(tray.szTip), last_percent >= 0
+            ? L"毒蝰 V2 Pro · %1%n上次 %2!d!%%（%3!02u!:%4!02u!）"
+            : L"毒蝰 V2 Pro · %1", args);
     }
 
     HICON previous = tray.hIcon;
@@ -341,21 +340,22 @@ static LRESULT CALLBACK handle_message(HWND handle, UINT message, WPARAM wparam,
 static void show_startup_error(const wchar_t *step, DWORD error)
 {
     wchar_t message[160];
-    swprintf(message, ARRAYSIZE(message), L"%ls失败（Windows 错误 %lu）。", step, error);
+    DWORD_PTR args[] = {(DWORD_PTR)step, (DWORD_PTR)error};
+    format_message(message, ARRAYSIZE(message), L"%1失败（Windows 错误 %2!u!）。", args);
     MessageBoxW(NULL, message, app_name, MB_OK | MB_ICONERROR);
 }
 
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int show)
+int run_tray(HINSTANCE instance, bool background)
 {
-    (void)previous;
-    (void)show;
-    bool background = strcmp(command, "--background") == 0;
     HANDLE mutex = CreateMutexW(NULL, FALSE, L"Local\\RazerBatteryTrayViperV2Pro");
+    DWORD mutex_error = GetLastError();
     if (!mutex) {
-        show_startup_error(L"启动程序", GetLastError());
+        startup_log("Mutex creation failed", mutex_error);
+        show_startup_error(L"启动程序", mutex_error);
         return 1;
     }
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (mutex_error == ERROR_ALREADY_EXISTS) {
+        startup_log("Another instance is running", 0);
         if (!background) {
             HWND running = FindWindowW(window_class, NULL);
             DWORD_PTR opened = 0;
@@ -390,7 +390,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int sh
                                  CW_USEDEFAULT, CW_USEDEFAULT, 470, 210,
                                  NULL, NULL, instance, NULL);
     if (!window) {
-        show_startup_error(L"创建电量窗口", GetLastError());
+        DWORD error = GetLastError();
+        startup_log("Window creation failed", error);
+        show_startup_error(L"创建电量窗口", error);
         CloseHandle(mutex);
         return 1;
     }
@@ -404,7 +406,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int sh
                         MENU_REFRESH, 22, 119, 108, 30) ||
         !create_control(instance, L"BUTTON", L"关闭窗口", BS_PUSHBUTTON | WS_TABSTOP,
                         BUTTON_CLOSE, 145, 119, 108, 30)) {
-        show_startup_error(L"初始化电量窗口", GetLastError());
+        DWORD error = GetLastError();
+        startup_log("Window controls failed", error);
+        show_startup_error(L"初始化电量窗口", error);
         DestroyWindow(window);
         CloseHandle(mutex);
         return 1;
@@ -414,12 +418,21 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int sh
         .cbSize = sizeof(tray), .hWnd = window, .uID = 1,
         .uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP, .uCallbackMessage = TRAY_MESSAGE
     };
-    refresh_tray();
-    if (!background)
+    if (!background) {
         show_status();
+        UpdateWindow(window);
+        startup_log("Status window shown", 0);
+    } else {
+        startup_log("Started in background mode", 0);
+    }
+    refresh_tray();
+    startup_log(tray_added ? "Notification icon added" : "Notification icon unavailable", 0);
     request_refresh();
-    if (!SetTimer(window, POLL_TIMER, POLL_MS, NULL))
-        show_startup_error(L"启动定时刷新", GetLastError());
+    if (!SetTimer(window, POLL_TIMER, POLL_MS, NULL)) {
+        DWORD error = GetLastError();
+        startup_log("Poll timer failed", error);
+        show_startup_error(L"启动定时刷新", error);
+    }
 
     MSG message;
     BOOL result;
@@ -430,7 +443,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous, LPSTR command, int sh
         }
     }
     if (result < 0) {
-        show_startup_error(L"读取窗口消息", GetLastError());
+        DWORD error = GetLastError();
+        startup_log("Message loop failed", error);
+        show_startup_error(L"读取窗口消息", error);
         DestroyWindow(window);
     }
     CloseHandle(mutex);

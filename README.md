@@ -2,9 +2,13 @@
 
 在 Windows 任务栏右下角直接显示雷蛇毒蝰 V2 Pro 的电量百分比。适用 Windows 10 / 11 x64，单个 EXE 双击即可运行，无需安装或管理员权限。
 
-[下载 Windows x64 EXE](https://raw.githubusercontent.com/zhuchen458/RazerBatteryTrayViperV2Pro/main/downloads/RazerBatteryTrayViperV2Pro.exe)
+[GitHub Releases](https://github.com/zhuchen458/RazerBatteryTrayViperV2Pro/releases) · [仓库备用下载](https://raw.githubusercontent.com/zhuchen458/RazerBatteryTrayViperV2Pro/main/downloads/RazerBatteryTrayViperV2Pro.exe)
 
-EXE 的 SHA-256 为 `19efb7385d9b36b315a06400c5cadb96fa3112dbebda80355ea1011a5a71c5c0`。已重新编译并检查报文编码、校验与电量换算，Windows 启动和 HID 读数仍待实机验证。
+v1.0.2 EXE 的 SHA-256 为 `768b41fa281fc7a8ef10a9064c2ac19d377b059fe507bc8ee5353d91375e2141`。已重新编译并复核电量报文解析，实际鼠标读数需用毒蝰 V2 Pro 验证。
+
+## 启动排查
+
+v1.0.2 的状态窗口先于托盘初始化显示。启动日志位于 `%TEMP%\RazerBatteryTrayViperV2Pro-startup.log`。如果双击后没有窗口，请查看日志最后一行。若没有本次启动的日志，请用 PowerShell 的 `Start-Process -PassThru -Wait` 检查进程退出代码。
 
 ## 使用方法
 
@@ -30,7 +34,20 @@ EXE 的 SHA-256 为 `19efb7385d9b36b315a06400c5cadb96fa3112dbebda80355ea1011a5a7
 在仓库根目录使用 Zig 0.15.2 或兼容版本。
 
 ```sh
-zig cc -target x86_64-windows-gnu -std=c11 -Wall -Wextra -Werror -Os -s -Wl,--subsystem,windows src/tray.c src/device.c -lhid -lsetupapi -luser32 -lgdi32 -lshell32 -ladvapi32 -o RazerBatteryTrayViperV2Pro.exe
+mkdir -p build
+for source in startup tray device; do
+  zig cc -target x86_64-windows-gnu -std=c11 -Wall -Wextra -Werror -Os \
+    -c "src/$source.c" -o "build/$source.o" || exit 1
+done
+zig cc -target x86_64-windows-gnu -s -nostdlib \
+  -Wl,--subsystem,windows -Wl,--entry=razor_start \
+  build/startup.o build/tray.o build/device.o \
+  -lkernel32 -lhid -lsetupapi -luser32 -lgdi32 -lshell32 -ladvapi32 -lucrtbase \
+  -o RazerBatteryTrayViperV2Pro.exe
 ```
+
+## 发布版本
+
+在 Windows 上运行 `pwsh -File scripts/test-windows.ps1` 检查待发布的 EXE。对每个版本创建独立的 `vX.Y.Z` Release，将该版本的 `downloads/RazerBatteryTrayViperV2Pro.exe` 作为附件上传，并让版本标签指向包含该文件的提交。
 
 托盘交互参考 [InphicBatteryTray](https://github.com/Tan-TanZi/InphicBatteryTray)。雷蛇设备 ID 和电量查询协议参考 [OpenRazer](https://github.com/openrazer/openrazer) 与 [razer-battery-report](https://github.com/xzeldon/razer-battery-report)。
