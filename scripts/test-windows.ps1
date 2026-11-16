@@ -14,9 +14,9 @@ $temp = Join-Path ([System.IO.Path]::GetTempPath()) "Razer Battery Tray $([Guid]
 $null = New-Item -Path $temp -ItemType Directory
 $copy = Join-Path $temp (Split-Path $exe -Leaf)
 $program = $null
-$runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$runKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
 $runName = 'RazerBatteryTrayViperV2Pro'
-$previous = Get-ItemPropertyValue -LiteralPath $runKey -Name $runName -ErrorAction SilentlyContinue
+$previous = $runKey.GetValue($runName)
 
 Add-Type @'
 using System;
@@ -38,7 +38,7 @@ function Confirm-LogonToggle($window, $expectedCommand) {
     }
 
     for ($i = 0; $i -lt 20; $i++) {
-        $actual = Get-ItemPropertyValue -LiteralPath $runKey -Name $runName -ErrorAction SilentlyContinue
+        $actual = $runKey.GetValue($runName)
         if ($actual -ceq $expectedCommand) { return }
         Start-Sleep -Milliseconds 100
     }
@@ -107,9 +107,10 @@ try {
         $program.WaitForExit()
     }
     if ($null -eq $previous) {
-        Remove-ItemProperty -LiteralPath $runKey -Name $runName -ErrorAction SilentlyContinue
+        $runKey.DeleteValue($runName, $false)
     } else {
-        Set-ItemProperty -LiteralPath $runKey -Name $runName -Value $previous
+        $runKey.SetValue($runName, $previous)
     }
+    $runKey.Dispose()
     Remove-Item -LiteralPath $temp -Recurse -Force
 }
