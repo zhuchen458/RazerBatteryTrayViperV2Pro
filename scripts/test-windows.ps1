@@ -4,38 +4,54 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path -LiteralPath $ExePath).Path
-$log = Join-Path ([System.IO.Path]::GetTempPath()) 'RazerBatteryTrayViperV2Pro-startup.log'
+$version = (Get-Item -LiteralPath $exe).VersionInfo.FileVersion
+if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    throw 'The EXE has no usable Windows file version.'
+}
 
-function Wait-ForWindow($process) {
+$log = Join-Path ([System.IO.Path]::GetTempPath()) "RazerBatteryTrayViperV2Pro-v$version-startup.log"
+$temp = Join-Path ([System.IO.Path]::GetTempPath()) "Razer Battery Tray $([Guid]::NewGuid())"
+$null = New-Item -Path $temp -ItemType Directory
+$copy = Join-Path $temp (Split-Path $exe -Leaf)
+$program = $null
+try {
+    Copy-Item -LiteralPath $exe -Destination $copy
+    Set-Content -LiteralPath $copy -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
+    if (Test-Path -LiteralPath $log) {
+        Remove-Item -LiteralPath $log
+    }
+
+    $launch = [System.Diagnostics.ProcessStartInfo]::new($copy)
+    $launch.UseShellExecute = $true
+    $launch.Verb = 'open'
+    $program = [System.Diagnostics.Process]::Start($launch)
+    if (!$program) {
+        throw 'Windows Shell did not return a tray process.'
+    }
+
     for ($i = 0; $i -lt 50; $i++) {
-        $process.Refresh()
-        if ($process.HasExited) {
-            throw ('Tray process exited with 0x{0:X8}.' -f $process.ExitCode)
+        $program.Refresh()
+        if ($program.HasExited) {
+            throw ('Tray process exited with 0x{0:X8}.' -f $program.ExitCode)
         }
-        if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
+        if ($program.MainWindowHandle -ne [IntPtr]::Zero -and
+            $program.MainWindowTitle -like "*v$version" -and
+            (Test-Path -LiteralPath $log) -and
+            (Select-String -LiteralPath $log -SimpleMatch 'Notification icon added' -Quiet)) {
+            if ($program.WaitForExit(1000)) {
+                throw ('Tray process exited with 0x{0:X8} after startup.' -f $program.ExitCode)
+            }
+            Write-Output $program.MainWindowTitle
             return
         }
         Start-Sleep -Milliseconds 200
     }
-    throw 'The status window did not open.'
-}
-
-$program = Start-Process -FilePath $exe -PassThru
-try {
-    Wait-ForWindow $program
-    for ($i = 0; $i -lt 20; $i++) {
-        if ((Test-Path -LiteralPath $log) -and
-            (Select-String -LiteralPath $log -SimpleMatch 'Status window shown' -Quiet)) {
-            Write-Output $program.MainWindowTitle
-            return
-        }
-        Start-Sleep -Milliseconds 100
-    }
-    throw 'The startup log did not confirm that the status window was shown.'
+    throw 'The versioned status window and notification icon were not confirmed.'
 } finally {
     if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log }
-    if (!$program.HasExited) {
+    if ($program -and !$program.HasExited) {
         Stop-Process -Id $program.Id
         $program.WaitForExit()
     }
+    Remove-Item -LiteralPath $temp -Recurse -Force
 }

@@ -22,7 +22,7 @@ enum {
     POLL_MS = 30000
 };
 
-static const wchar_t app_name[] = L"毒蝰 V2 Pro 电量托盘 v1.0.2";
+static const wchar_t app_name[] = L"毒蝰 V2 Pro 电量托盘 v1.0.3";
 static const wchar_t window_class[] = L"RazerBatteryTrayViperV2Pro";
 static const wchar_t run_key[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 static const wchar_t run_value[] = L"RazerBatteryTrayViperV2Pro";
@@ -199,7 +199,7 @@ static bool startup_command(wchar_t *command, DWORD capacity, bool background)
     command[length + 1] = L'"';
     command[length + 2] = L'\0';
     if (background)
-        wcscpy(command + length + 2, background_option);
+        memcpy(command + length + 2, background_option, sizeof(background_option));
     return true;
 }
 
@@ -212,9 +212,9 @@ static bool starts_at_logon(void)
                      NULL, value, &bytes) != ERROR_SUCCESS)
         return false;
     return (startup_command(current_path, ARRAYSIZE(current_path), true) &&
-            _wcsicmp(value, current_path) == 0) ||
+            lstrcmpiW(value, current_path) == 0) ||
            (startup_command(current_path, ARRAYSIZE(current_path), false) &&
-            _wcsicmp(value, current_path) == 0);
+            lstrcmpiW(value, current_path) == 0);
 }
 
 static void toggle_autostart(void)
@@ -229,7 +229,7 @@ static void toggle_autostart(void)
             return;
         }
         status = RegSetKeyValueW(HKEY_CURRENT_USER, run_key, run_value, REG_SZ,
-                                 command, (DWORD)((wcslen(command) + 1) * sizeof(wchar_t)));
+                                 command, (DWORD)((lstrlenW(command) + 1) * sizeof(wchar_t)));
     }
 
     if (status != ERROR_SUCCESS)

@@ -3,16 +3,28 @@
 #include <hidsdi.h>
 #include <hidpi.h>
 #include <setupapi.h>
-#include <stdlib.h>
 #include "device.h"
 #include "protocol.h"
 
 #define VENDOR_ID 0x1532
 #define SHARE_FLAGS (FILE_SHARE_READ | FILE_SHARE_WRITE)
 
+static bool path_contains(const wchar_t *path, const wchar_t *part)
+{
+    for (; *path; ++path) {
+        size_t offset = 0;
+        while (part[offset] && path[offset] == part[offset])
+            ++offset;
+        if (!part[offset])
+            return true;
+    }
+    return false;
+}
+
 static bool query(HANDLE device, DWORD length, uint8_t command, uint8_t *value)
 {
-    uint8_t *report = calloc(length, 1);
+    HANDLE heap = GetProcessHeap();
+    uint8_t *report = HeapAlloc(heap, 0, length);
     if (!report)
         return false;
 
@@ -32,7 +44,7 @@ static bool query(HANDLE device, DWORD length, uint8_t command, uint8_t *value)
         }
         Sleep(10);
     }
-    free(report);
+    HeapFree(heap, 0, report);
     return success;
 }
 
@@ -106,22 +118,22 @@ Battery read_battery(void)
                 if (bytes < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W))
                     continue;
 
-                PSP_DEVICE_INTERFACE_DETAIL_DATA_W detail = malloc(bytes);
+                PSP_DEVICE_INTERFACE_DETAIL_DATA_W detail = HeapAlloc(GetProcessHeap(), 0, bytes);
                 if (!detail)
                     continue;
 
                 detail->cbSize = sizeof(*detail);
                 if (SetupDiGetDeviceInterfaceDetailW(devices, &item, detail, bytes, NULL, NULL)) {
                     wchar_t *path = detail->DevicePath;
-                    CharLowerBuffW(path, (DWORD)wcslen(path));
-                    if (wcsstr(path, supported[model].id)) {
+                    CharLowerBuffW(path, (DWORD)lstrlenW(path));
+                    if (path_contains(path, supported[model].id)) {
                         battery.percent = NO_RESPONSE;
                         /* Both Viper V2 Pro connections issue control commands on USB interface 0. */
-                        if (wcsstr(path, L"&mi_00") || !wcsstr(path, L"&mi_"))
+                        if (path_contains(path, L"&mi_00") || !path_contains(path, L"&mi_"))
                             try_collection(path, supported[model].product, pass == 0, &battery);
                     }
                 }
-                free(detail);
+                HeapFree(GetProcessHeap(), 0, detail);
             }
         }
     }

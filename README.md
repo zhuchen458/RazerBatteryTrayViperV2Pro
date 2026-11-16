@@ -4,11 +4,24 @@
 
 [GitHub Releases](https://github.com/zhuchen458/RazerBatteryTrayViperV2Pro/releases) · [仓库备用下载](https://raw.githubusercontent.com/zhuchen458/RazerBatteryTrayViperV2Pro/main/downloads/RazerBatteryTrayViperV2Pro.exe)
 
-v1.0.2 EXE 的 SHA-256 为 `768b41fa281fc7a8ef10a9064c2ac19d377b059fe507bc8ee5353d91375e2141`。已重新编译并复核电量报文解析，实际鼠标读数需用毒蝰 V2 Pro 验证。
-
 ## 启动排查
 
-v1.0.2 的状态窗口先于托盘初始化显示。启动日志位于 `%TEMP%\RazerBatteryTrayViperV2Pro-startup.log`。如果双击后没有窗口，请查看日志最后一行。若没有本次启动的日志，请用 PowerShell 的 `Start-Process -PassThru -Wait` 检查进程退出代码。
+v1.0.3 双击先显示状态窗口，启动日志位于 `%TEMP%\RazerBatteryTrayViperV2Pro-v1.0.3-startup.log`。如果双击后没有窗口，请查看日志最后一行。若没有本次启动的日志，在 EXE 所在文件夹打开 PowerShell，运行下列命令并保留输出。
+
+```powershell
+try {
+    $app = Start-Process -FilePath (Resolve-Path .\RazerBatteryTrayViperV2Pro.exe) -PassThru -ErrorAction Stop
+    if ($app.WaitForExit(4000)) {
+        'ExitCode = 0x{0:X8}' -f $app.ExitCode
+    } else {
+        'Process running, PID = {0}' -f $app.Id
+    }
+} catch {
+    $_.Exception.Message
+}
+```
+
+如果 Windows 安全中心的「保护历史记录」有与该 EXE 同一时间的拦截记录，也请保留这条记录。程序不需要管理员权限。
 
 ## 使用方法
 
@@ -34,16 +47,17 @@ v1.0.2 的状态窗口先于托盘初始化显示。启动日志位于 `%TEMP%\R
 在仓库根目录使用 Zig 0.15.2 或兼容版本。
 
 ```sh
-mkdir -p build
-for source in startup tray device; do
-  zig cc -target x86_64-windows-gnu -std=c11 -Wall -Wextra -Werror -Os \
+mkdir -p build downloads
+(cd src && zig rc /fo ../build/application.res application.rc) || exit 1
+for source in startup tray device memory; do
+  zig cc -target x86_64-windows-gnu -std=c11 -Wall -Wextra -Werror -Os -fno-builtin \
     -c "src/$source.c" -o "build/$source.o" || exit 1
 done
 zig cc -target x86_64-windows-gnu -s -nostdlib \
   -Wl,--subsystem,windows -Wl,--entry=razor_start \
-  build/startup.o build/tray.o build/device.o \
-  -lkernel32 -lhid -lsetupapi -luser32 -lgdi32 -lshell32 -ladvapi32 -lucrtbase \
-  -o RazerBatteryTrayViperV2Pro.exe
+  build/startup.o build/tray.o build/device.o build/memory.o build/application.res \
+  -lkernel32 -lhid -lsetupapi -luser32 -lgdi32 -lshell32 -ladvapi32 \
+  -o downloads/RazerBatteryTrayViperV2Pro.exe
 ```
 
 ## 发布版本
