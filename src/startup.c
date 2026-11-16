@@ -16,7 +16,7 @@ void format_message(wchar_t *buffer, DWORD capacity, const wchar_t *format, DWOR
 
 static void reset_startup_log(void)
 {
-    const wchar_t name[] = L"RazerBatteryTrayViperV2Pro-v1.0.3-startup.log";
+    const wchar_t name[] = L"RazerBatteryTrayViperV2Pro-v1.0.4-startup.log";
     DWORD length = GetTempPathW(ARRAYSIZE(log_path), log_path);
     if (!length || length > ARRAYSIZE(log_path) - ARRAYSIZE(name)) {
         log_path[0] = L'\0';
@@ -52,7 +52,7 @@ void startup_log(const char *stage, DWORD error)
 void WINAPI razor_start(void)
 {
     reset_startup_log();
-    startup_log("Razer Battery Tray v1.0.3 entry point reached", 0);
+    startup_log("Razer Battery Tray v1.0.4 entry point reached", 0);
 
     int count = 0;
     wchar_t **arguments = CommandLineToArgvW(GetCommandLineW(), &count);

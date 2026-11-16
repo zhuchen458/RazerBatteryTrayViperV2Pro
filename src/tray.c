@@ -19,10 +19,11 @@ enum {
     MENU_EXIT,
     MENU_STATUS,
     BUTTON_CLOSE,
+    CHECK_AUTOSTART,
     POLL_MS = 30000
 };
 
-static const wchar_t app_name[] = L"毒蝰 V2 Pro 电量托盘 v1.0.3";
+static const wchar_t app_name[] = L"毒蝰 V2 Pro 电量托盘 v1.0.4";
 static const wchar_t window_class[] = L"RazerBatteryTrayViperV2Pro";
 static const wchar_t run_key[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 static const wchar_t run_value[] = L"RazerBatteryTrayViperV2Pro";
@@ -31,6 +32,7 @@ enum { STARTUP_COMMAND_CAPACITY = MAX_PATH + 3 + ARRAYSIZE(background_option) };
 static HWND window;
 static HWND status_text;
 static HWND tray_text;
+static HWND autostart_checkbox;
 static UINT taskbar_created;
 static NOTIFYICONDATAW tray;
 static bool tray_added;
@@ -145,12 +147,6 @@ static void refresh_tray(void)
         : L"托盘图标暂未显示，程序会继续尝试添加。");
 }
 
-static void show_status(void)
-{
-    ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
-    SetForegroundWindow(window);
-}
-
 static HWND create_control(HINSTANCE instance, const wchar_t *class,
                            const wchar_t *label, DWORD style, int id,
                            int x, int y, int width, int height)
@@ -217,6 +213,19 @@ static bool starts_at_logon(void)
             lstrcmpiW(value, current_path) == 0);
 }
 
+static void update_autostart_checkbox(void)
+{
+    SendMessageW(autostart_checkbox, BM_SETCHECK,
+                 starts_at_logon() ? BST_CHECKED : BST_UNCHECKED, 0);
+}
+
+static void show_status(void)
+{
+    update_autostart_checkbox();
+    ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(window);
+}
+
 static void toggle_autostart(void)
 {
     LSTATUS status;
@@ -232,6 +241,7 @@ static void toggle_autostart(void)
                                  command, (DWORD)((lstrlenW(command) + 1) * sizeof(wchar_t)));
     }
 
+    update_autostart_checkbox();
     if (status != ERROR_SUCCESS)
         MessageBoxW(window, L"无法修改当前用户的开机启动设置。", app_name, MB_ICONWARNING);
 }
@@ -295,6 +305,10 @@ static LRESULT CALLBACK handle_message(HWND handle, UINT message, WPARAM wparam,
         request_refresh();
         return 0;
     case WM_COMMAND:
+        if (LOWORD(wparam) == CHECK_AUTOSTART && HIWORD(wparam) == BN_CLICKED) {
+            toggle_autostart();
+            return 0;
+        }
         if (LOWORD(wparam) == MENU_REFRESH) {
             request_refresh();
             return 0;
@@ -401,7 +415,10 @@ int run_tray(HINSTANCE instance, bool background)
                                  0, 22, 22, 416, 46);
     tray_text = create_control(instance, L"STATIC", L"正在添加托盘图标…", SS_LEFT,
                                0, 22, 76, 416, 28);
-    if (!status_text || !tray_text ||
+    autostart_checkbox = create_control(instance, L"BUTTON", L"登录时自动启动",
+                                        BS_CHECKBOX | WS_TABSTOP, CHECK_AUTOSTART,
+                                        268, 119, 160, 30);
+    if (!status_text || !tray_text || !autostart_checkbox ||
         !create_control(instance, L"BUTTON", L"立即刷新", BS_PUSHBUTTON | WS_TABSTOP,
                         MENU_REFRESH, 22, 119, 108, 30) ||
         !create_control(instance, L"BUTTON", L"关闭窗口", BS_PUSHBUTTON | WS_TABSTOP,
