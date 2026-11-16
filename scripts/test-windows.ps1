@@ -16,7 +16,6 @@ $copy = Join-Path $temp (Split-Path $exe -Leaf)
 $program = $null
 try {
     Copy-Item -LiteralPath $exe -Destination $copy
-    Set-Content -LiteralPath $copy -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
     if (Test-Path -LiteralPath $log) {
         Remove-Item -LiteralPath $log
     }
